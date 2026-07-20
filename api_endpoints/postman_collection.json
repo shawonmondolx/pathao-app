@@ -1,0 +1,649 @@
+{
+  "info": {
+    "name": "Pathao Agent API v7.1.2",
+    "description": "Reverse-engineered from com.pathao.agent APK. Base: https://api-hermes.pathao.com/talaria",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "pathao-agent-v7-1-2"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://api-hermes.pathao.com/talaria" },
+    { "key": "oms_base_url", "value": "https://api-hermes.pathao.com/api/agents/v1/oms" },
+    { "key": "cdn_base_url", "value": "https://cdn.pathao.com" },
+    { "key": "token", "value": "" },
+    { "key": "app_version", "value": "7.1.2" },
+    { "key": "x_language", "value": "en" },
+    { "key": "x_country_id", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Login (Issue Token)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "var json = pm.response.json();",
+            "if (json.data && json.data.token) { pm.collectionVariables.set('token', json.data.token); }"
+          ], "type": "text/javascript" } }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "App-Version", "value": "{{app_version}}" },
+              { "key": "X-Language", "value": "{{x_language}}" },
+              { "key": "X-Country-Id", "value": "{{x_country_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"01777884223\",\n  \"password\": \"YourPassword\",\n  \"client_id\": \"1\",\n  \"client_secret\": \"<secret>\",\n  \"grant_type\": \"password\",\n  \"scope\": \"*\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/issue-token", "host": ["{{base_url}}"], "path": ["api","v1","issue-token"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "App-Version", "value": "{{app_version}}" },
+              { "key": "X-Language", "value": "{{x_language}}" },
+              { "key": "X-Country-Id", "value": "{{x_country_id}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/v1/logout", "host": ["{{base_url}}"], "path": ["api","v1","logout"] }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"old_password\": \"current\",\n  \"new_password\": \"newpass\",\n  \"new_password_confirmation\": \"newpass\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/reset-password", "host": ["{{base_url}}"], "path": ["api","v1","user","reset-password"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. User Profile",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "App-Version", "value": "{{app_version}}" }, { "key": "X-Language", "value": "{{x_language}}" }, { "key": "X-Country-Id", "value": "{{x_country_id}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user", "host": ["{{base_url}}"], "path": ["api","v1","user"] }
+          }
+        },
+        {
+          "name": "Upload Profile Image",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "formdata", "formdata": [{ "key": "image", "type": "file", "src": "" }] },
+            "url": { "raw": "{{base_url}}/api/v1/user/profile-image", "host": ["{{base_url}}"], "path": ["api","v1","user","profile-image"] }
+          }
+        },
+        {
+          "name": "Toggle Profile Mode",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"profile\": \"delivery\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/profile-toggle", "host": ["{{base_url}}"], "path": ["api","v1","user","profile-toggle"] }
+          }
+        },
+        {
+          "name": "Delete Account",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/delete-account", "host": ["{{base_url}}"], "path": ["api","v1","user","delete-account"] }
+          }
+        },
+        {
+          "name": "Get Agent Ratings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/agent-ratings", "host": ["{{base_url}}"], "path": ["api","v1","user","agent-ratings"] }
+          }
+        },
+        {
+          "name": "Get Agent Reviews",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/agent-reviews", "host": ["{{base_url}}"], "path": ["api","v1","user","agent-reviews"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "App-Version", "value": "{{app_version}}" }, { "key": "X-Language", "value": "{{x_language}}" }, { "key": "X-Country-Id", "value": "{{x_country_id}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/dashboard", "host": ["{{base_url}}"], "path": ["api","v1","dashboard"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Delivery",
+      "item": [
+        {
+          "name": "Get Delivery List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "App-Version", "value": "{{app_version}}" }, { "key": "X-Language", "value": "{{x_language}}" }, { "key": "X-Country-Id", "value": "{{x_country_id}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/delivery", "host": ["{{base_url}}"], "path": ["api","v1","user","delivery"] }
+          }
+        },
+        {
+          "name": "Update Delivery Status",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"run_order_id\": 12345,\n  \"status\": 2\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/delivery", "host": ["{{base_url}}"], "path": ["api","v1","user","delivery"] }
+          }
+        },
+        {
+          "name": "Get Delivery Details",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/delivery/:consignmentId", "host": ["{{base_url}}"], "path": ["api","v1","user","delivery",":consignmentId"], "variable": [{ "key": "consignmentId", "value": "DTK0000001" }] }
+          }
+        },
+        {
+          "name": "Confirm Delivery (Check)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }, { "key": "App-Version", "value": "{{app_version}}" }, { "key": "X-Language", "value": "{{x_language}}" }, { "key": "X-Country-Id", "value": "{{x_country_id}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"run_order_id\": 12345,\n  \"status\": 2,\n  \"otp\": \"1234\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/delivery/check", "host": ["{{base_url}}"], "path": ["api","v1","user","delivery","check"] }
+          }
+        },
+        {
+          "name": "Verify QC OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"run_order_id\": 12345,\n  \"otp\": \"4321\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/delivery/check/qc-otp", "host": ["{{base_url}}"], "path": ["api","v1","user","delivery","check","qc-otp"] }
+          }
+        },
+        {
+          "name": "Resend Delivery OTP SMS",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"run_order_id\": 12345}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/delivery/sms-resend", "host": ["{{base_url}}"], "path": ["api","v1","user","delivery","sms-resend"] }
+          }
+        },
+        {
+          "name": "Sort Delivery List",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"delivery_ids\": [3, 1, 2]}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/sort-delivery", "host": ["{{base_url}}"], "path": ["api","v1","user","sort-delivery"] }
+          }
+        },
+        {
+          "name": "Approve Delivery",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/deliveries/:runRouteOrderId/approve", "host": ["{{base_url}}"], "path": ["api","v1","user","deliveries",":runRouteOrderId","approve"], "variable": [{ "key": "runRouteOrderId", "value": "77" }] }
+          }
+        },
+        {
+          "name": "Get Hold Reasons",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/delivery/hold-reasons", "host": ["{{base_url}}"], "path": ["api","v1","delivery","hold-reasons"] }
+          }
+        },
+        {
+          "name": "Get Return Reasons",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/delivery/return-reasons", "host": ["{{base_url}}"], "path": ["api","v1","delivery","return-reasons"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Pickup",
+      "item": [
+        {
+          "name": "Get Pickup List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "App-Version", "value": "{{app_version}}" }, { "key": "X-Language", "value": "{{x_language}}" }, { "key": "X-Country-Id", "value": "{{x_country_id}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/pickup", "host": ["{{base_url}}"], "path": ["api","v1","user","pickup"] }
+          }
+        },
+        {
+          "name": "Submit Pickup OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"store_id\": 101, \"otp\": \"1234\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/pickup-done", "host": ["{{base_url}}"], "path": ["api","v1","user","pickup-done"] }
+          }
+        },
+        {
+          "name": "Verify Pickup OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"store_id\": 101, \"otp\": \"1234\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/pickup-done-check", "host": ["{{base_url}}"], "path": ["api","v1","user","pickup-done-check"] }
+          }
+        },
+        {
+          "name": "Resend Pickup OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"store_id\": 101}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/pickup-sms-resend", "host": ["{{base_url}}"], "path": ["api","v1","user","pickup-sms-resend"] }
+          }
+        },
+        {
+          "name": "Sort Pickup List",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"pickup_ids\": [3,1,2]}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/sort-pickup", "host": ["{{base_url}}"], "path": ["api","v1","user","sort-pickup"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Return",
+      "item": [
+        {
+          "name": "Get Return List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/return", "host": ["{{base_url}}"], "path": ["api","v1","user","return"] }
+          }
+        },
+        {
+          "name": "Update Return Status",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"run_order_id\": 67890, \"status\": 4, \"return_reason_id\": 2}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/return", "host": ["{{base_url}}"], "path": ["api","v1","user","return"] }
+          }
+        },
+        {
+          "name": "Submit Return OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"store_id\": 101}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/return-done", "host": ["{{base_url}}"], "path": ["api","v1","user","return-done"] }
+          }
+        },
+        {
+          "name": "Verify Return OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"store_id\": 101, \"otp\": \"9012\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/return-done-check", "host": ["{{base_url}}"], "path": ["api","v1","user","return-done-check"] }
+          }
+        },
+        {
+          "name": "Resend Return OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"store_id\": 101}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/return-sms-resend", "host": ["{{base_url}}"], "path": ["api","v1","user","return-sms-resend"] }
+          }
+        },
+        {
+          "name": "Sort Return List",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"return_ids\": [5,3,1]}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/sort-return", "host": ["{{base_url}}"], "path": ["api","v1","user","sort-return"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Runs & Transfers",
+      "item": [
+        {
+          "name": "Get Run Details",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/runs/:runRouteId", "host": ["{{base_url}}"], "path": ["api","v1","user","runs",":runRouteId"], "variable": [{"key":"runRouteId","value":"42"}] }
+          }
+        },
+        {
+          "name": "Get VDA Transfer List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/transfers", "host": ["{{base_url}}"], "path": ["api","v1","user","transfers"] }
+          }
+        },
+        {
+          "name": "Get Pick Merchant Orders",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/pick-merchant-orders", "host": ["{{base_url}}"], "path": ["api","v1","user","pick-merchant-orders"] }
+          }
+        },
+        {
+          "name": "Mark Pick Merchant Orders Done",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"run_route_id\": 42}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/pick-merchant-orders-done", "host": ["{{base_url}}"], "path": ["api","v1","user","pick-merchant-orders-done"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. C2C Pickup",
+      "item": [
+        {
+          "name": "Get C2C Pickup List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/c2c-pickup", "host": ["{{base_url}}"], "path": ["api","v1","user","c2c-pickup"] }
+          }
+        },
+        {
+          "name": "Get C2C Pickup Details",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/c2c-pickup/:runRouteOrderId", "host": ["{{base_url}}"], "path": ["api","v1","user","c2c-pickup",":runRouteOrderId"], "variable": [{"key":"runRouteOrderId","value":"77"}] }
+          }
+        },
+        {
+          "name": "Confirm C2C Pickup",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"run_route_order_id\": 77,\n  \"status\": \"collected\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/c2c-pickup", "host": ["{{base_url}}"], "path": ["api","v1","user","c2c-pickup"] }
+          }
+        },
+        {
+          "name": "Update C2C Attempt Status (OMS)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"status\": \"collected\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{oms_base_url}}/dispatches/attempts/attemptId/status", "host": ["{{oms_base_url}}"], "path": ["dispatches","attempts","attemptId","status"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Cash & Wallet",
+      "item": [
+        {
+          "name": "Get Earnings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/earnings", "host": ["{{base_url}}"], "path": ["api","v1","user","earnings"] }
+          }
+        },
+        {
+          "name": "Get Payment Info",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/payment-info", "host": ["{{base_url}}"], "path": ["api","v1","user","payment-info"] }
+          }
+        },
+        {
+          "name": "Send Payment Link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"consignment_id\": \"DTK0000001\",\n  \"phone\": \"01700000000\",\n  \"amount\": 500\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/payments/send-link", "host": ["{{base_url}}"], "path": ["api","v1","user","payments","send-link"] }
+          }
+        },
+        {
+          "name": "Get Wallet List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/wallet-list", "host": ["{{base_url}}"], "path": ["api","v1","wallet-list"] }
+          }
+        },
+        {
+          "name": "Get XDP Payment Info",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/xdp-payment-info/:agentId", "host": ["{{base_url}}"], "path": ["api","v1","xdp-payment-info",":agentId"], "variable": [{"key":"agentId","value":"123"}] }
+          }
+        },
+        {
+          "name": "Confirm XDP Payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"amount\": 5000}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/xdp-payment-info/:agentId", "host": ["{{base_url}}"], "path": ["api","v1","xdp-payment-info",":agentId"], "variable": [{"key":"agentId","value":"123"}] }
+          }
+        },
+        {
+          "name": "Merchant Search",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/merchant-search?q=shop", "host": ["{{base_url}}"], "path": ["api","v1","user","merchant-search"], "query": [{"key":"q","value":"shop"}] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Attendance",
+      "item": [
+        {
+          "name": "Get Daily Attendance",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/attendances/daily", "host": ["{{base_url}}"], "path": ["api","v1","attendances","daily"] }
+          }
+        },
+        {
+          "name": "Clock In (Entry)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 23.8103,\n  \"longitude\": 90.4125\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/attendances/submit/entry", "host": ["{{base_url}}"], "path": ["api","v1","attendances","submit","entry"] }
+          }
+        },
+        {
+          "name": "Clock Out (Exit)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 23.8103,\n  \"longitude\": 90.4125\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/attendances/submit/exit", "host": ["{{base_url}}"], "path": ["api","v1","attendances","submit","exit"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Location & Pings",
+      "item": [
+        {
+          "name": "Submit GPS Location",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 23.8103,\n  \"longitude\": 90.4125\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/latlon", "host": ["{{base_url}}"], "path": ["api","v1","user","latlon"] }
+          }
+        },
+        {
+          "name": "Submit Ping",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 23.8103,\n  \"longitude\": 90.4125,\n  \"battery\": 85\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/pings", "host": ["{{base_url}}"], "path": ["api","v1","pings"] }
+          }
+        },
+        {
+          "name": "Get Pings Config",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/pings/config", "host": ["{{base_url}}"], "path": ["api","v1","pings","config"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Messaging",
+      "item": [
+        {
+          "name": "Get All Messages",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/deliveries/messages", "host": ["{{base_url}}"], "path": ["api","v1","user","deliveries","messages"] }
+          }
+        },
+        {
+          "name": "Get Consignment Messages",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/user/deliveries/:consignment_id/messages", "host": ["{{base_url}}"], "path": ["api","v1","user","deliveries",":consignment_id","messages"], "variable": [{"key":"consignment_id","value":"DTK0000001"}] }
+          }
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"message\": \"On my way\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/deliveries/:consignment_id/messages", "host": ["{{base_url}}"], "path": ["api","v1","user","deliveries",":consignment_id","messages"], "variable": [{"key":"consignment_id","value":"DTK0000001"}] }
+          }
+        },
+        {
+          "name": "Mark Messages Seen",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"message_ids\": [1,2,3]}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/deliveries/:consignment_id/messages", "host": ["{{base_url}}"], "path": ["api","v1","user","deliveries",":consignment_id","messages"], "variable": [{"key":"consignment_id","value":"DTK0000001"}] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. Push & Broadcast",
+      "item": [
+        {
+          "name": "Subscribe Push Notifications",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fcm_token\": \"APA91bH...\",\n  \"device_type\": \"android\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/push/subscribe", "host": ["{{base_url}}"], "path": ["api","v1","user","push","subscribe"] }
+          }
+        },
+        {
+          "name": "Unsubscribe Push Notifications",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"fcm_token\": \"APA91bH...\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/user/push/unsubscribe", "host": ["{{base_url}}"], "path": ["api","v1","user","push","unsubscribe"] }
+          }
+        },
+        {
+          "name": "Broadcast User Auth",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"socket_id\": \"1234.5678\",\n  \"channel_name\": \"private-agent-123\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/broadcast/user-auth/agent", "host": ["{{base_url}}"], "path": ["api","v1","broadcast","user-auth","agent"] }
+          }
+        },
+        {
+          "name": "Broadcast Channel Auth",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"socket_id\": \"1234.5678\",\n  \"channel_name\": \"presence-delivery-run-42\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/broadcast/auth/agent", "host": ["{{base_url}}"], "path": ["api","v1","broadcast","auth","agent"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. QC & CDN Upload",
+      "item": [
+        {
+          "name": "Submit QC Request",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"consignment_id\": \"DTK0000001\",\n  \"scanned_barcode\": \"DTK0000001_BARCODE\"\n}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/qc-request", "host": ["{{base_url}}"], "path": ["api","v1","qc-request"] }
+          }
+        },
+        {
+          "name": "Delete QC Request",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"request_id\": \"QC_REQ_001\"}", "options": {"raw":{"language":"json"}} },
+            "url": { "raw": "{{base_url}}/api/v1/qc-request", "host": ["{{base_url}}"], "path": ["api","v1","qc-request"] }
+          }
+        },
+        {
+          "name": "Upload File to CDN",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": "" }, { "key": "type", "value": "proof", "type": "text" }] },
+            "url": { "raw": "{{base_url}}/api/v1/cdn/upload", "host": ["{{base_url}}"], "path": ["api","v1","cdn","upload"] }
+          }
+        }
+      ]
+    }
+  ]
+}

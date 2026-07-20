@@ -55,19 +55,28 @@ class DashboardStats {
   }
 
   factory DashboardStats.fromJson(Map<String, dynamic> json) {
+    int delivered = json['delivery_completed'] ?? json['delivered'] ?? 0;
+    int priceChange = json['price_change'] ?? 0;
+    int returned = json['returned'] ?? json['return'] ?? 0;
+    int partialDelivery = json['partial_delivery'] ?? 0;
+    int onHold = json['on_hold'] ?? 0;
+    int drto = json['drto'] ?? 0;
+    int exchange = json['exchange'] ?? 0;
+    int totalCompleted = delivered + priceChange + returned + partialDelivery + onHold + drto + exchange;
+
     return DashboardStats(
       cashCollected: (json['cash_collected'] ?? 0).toDouble(),
       cashCollectableTotal: (json['cash_collectable_total'] ?? 0).toDouble(),
       deliveryTotal: json['delivery_total'] ?? 0,
-      deliveryCompleted: json['delivery_completed'] ?? json['delivered'] ?? 0,
-      priceChange: json['price_change'] ?? 0,
-      returned: json['returned'] ?? json['return'] ?? 0,
-      partialDelivery: json['partial_delivery'] ?? 0,
-      onHold: json['on_hold'] ?? 0,
-      delivered: json['delivery_completed'] ?? json['delivered'] ?? 0,
+      deliveryCompleted: totalCompleted,
+      priceChange: priceChange,
+      returned: returned,
+      partialDelivery: partialDelivery,
+      onHold: onHold,
+      delivered: delivered,
       pending: json['pending'] ?? 0,
-      drto: json['drto'] ?? 0,
-      exchange: json['exchange'] ?? 0,
+      drto: drto,
+      exchange: exchange,
       isRunClosed: json['is_run_closed'] ?? false,
       hasDelivery: json['has_delivery'] ?? true,
       hasPickup: json['has_pickup'] ?? false,

@@ -6,6 +6,8 @@ import '../../../core/constants/app_colors.dart';
 import '../../../shared/widgets/status_badge.dart';
 import '../domain/delivery_provider.dart';
 
+final deliveryStatusFilterProvider = StateProvider<int?>((ref) => null);
+
 class DeliveryListScreen extends ConsumerStatefulWidget {
   const DeliveryListScreen({super.key});
 
@@ -156,26 +158,50 @@ class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF3F51B5), letterSpacing: 0.5),
                     ),
                   ),
-                  // Sort button
-                  SizedBox(
-                    height: 32,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: AppColors.greyDark),
-                        foregroundColor: AppColors.greyDark,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
+                  // Filter chip & Sort button
+                  Row(
+                    children: [
+                      if (ref.watch(deliveryStatusFilterProvider) != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: SizedBox(
+                            height: 32,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: AppColors.red),
+                                foregroundColor: AppColors.red,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                              ),
+                              onPressed: () => ref.read(deliveryStatusFilterProvider.notifier).state = null,
+                              icon: const Icon(Icons.close, size: 14),
+                              label: const Text('Clear', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      SizedBox(
+                        height: 32,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.greyDark),
+                            foregroundColor: AppColors.greyDark,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Sort orders requested')),
+                            );
+                          },
+                          icon: const Icon(Icons.sort, size: 14),
+                          label: const Text('Sort Orders', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
                       ),
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Sort orders requested')),
-                        );
-                      },
-                      icon: const Icon(Icons.sort, size: 14),
-                      label: const Text('Sort Orders', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -216,12 +242,31 @@ class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
                 data: (deliveryState) {
                   final list = deliveryState.orders;
                   final query = _searchController.text.toLowerCase();
+                  final statusFilter = ref.watch(deliveryStatusFilterProvider);
+                  
                   final filteredList = list.where((item) {
-                    return query.isEmpty ||
+                    final matchesQuery = query.isEmpty ||
                         item.id.toLowerCase().contains(query) ||
                         item.recipientName.toLowerCase().contains(query) ||
                         item.recipientPhone.contains(query) ||
                         item.merchantName.toLowerCase().contains(query);
+                        
+                    final matchesStatus = statusFilter == null || (() {
+                      final itemStatus = item.status.toString().toUpperCase();
+                      switch(statusFilter) {
+                        case DeliveryStatus.pending: return itemStatus == 'PENDING';
+                        case DeliveryStatus.delivered: return itemStatus == 'DELIVERED';
+                        case DeliveryStatus.returned: return itemStatus == 'RETURNED' || itemStatus == 'RETURN';
+                        case DeliveryStatus.onHold: return itemStatus == 'ON HOLD' || itemStatus == 'HOLD' || itemStatus == 'ONHOLD';
+                        case DeliveryStatus.partialDelivery: return itemStatus == 'PARTIAL DELIVERY' || itemStatus == 'PARTIAL_DELIVERY';
+                        case DeliveryStatus.priceChange: return itemStatus == 'PRICE CHANGE' || itemStatus == 'PRICE_CHANGE';
+                        case DeliveryStatus.drto: return itemStatus == 'DRTO';
+                        case DeliveryStatus.exchange: return itemStatus == 'EXCHANGE';
+                        default: return item.status == statusFilter;
+                      }
+                    })();
+                    
+                    return matchesQuery && matchesStatus;
                   }).toList();
   
                   if (filteredList.isEmpty) {

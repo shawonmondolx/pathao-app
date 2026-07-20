@@ -219,7 +219,7 @@ class _DrtoScreenState extends ConsumerState<DrtoScreen> {
           DropdownButtonFormField<String>(
             decoration: const InputDecoration(border: OutlineInputBorder()),
             hint: const Text('Select a reason'),
-            value: _selectedReason,
+            initialValue: _selectedReason,
             isExpanded: true,
             items: reasons.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
             onChanged: (val) => setState(() => _selectedReason = val),

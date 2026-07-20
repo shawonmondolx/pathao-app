@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pathao_agent_flutter/core/network/dio_client.dart';
-import 'package:pathao_agent_flutter/core/constants/api_endpoints.dart';
+import '../network/dio_client.dart';
+import '../constants/api_endpoints.dart';
 // Note: In a real app this would depend on Firebase Messaging to get the token.
 // For now, we mock the device FCM token string.
 

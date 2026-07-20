@@ -12,6 +12,9 @@ import '../../pickup/presentation/pickup_list_screen.dart';
 import '../../return/presentation/return_list_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../profile/domain/user_provider.dart';
+import '../../delivery/domain/delivery_provider.dart';
+import '../../delivery/domain/run_provider.dart';
+import '../../delivery/domain/transfers_provider.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -24,13 +27,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentTabIndex = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  final List<Widget> _tabs = [
-    const _DashboardTab(),
-    const DeliveryListScreen(),
-    const PickupListScreen(),
-    const ReturnListScreen(),
-    const SettingsScreen(),
-  ];
+  Widget _buildBody(BuildContext context) {
+    switch (_currentTabIndex) {
+      case 0:
+        return _DashboardTab(
+          onNavigate: (status) {
+            ref.read(deliveryStatusFilterProvider.notifier).state = status;
+            setState(() => _currentTabIndex = 1);
+          },
+        );
+      case 1:
+        return const DeliveryListScreen();
+      case 2:
+        return const PickupListScreen();
+      case 3:
+        return const ReturnListScreen();
+      case 4:
+        return const SettingsScreen();
+      default:
+        return const SizedBox();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,11 +55,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Delivery (index 1) handles its own full-screen UI.
     final bool showAppBar = _currentTabIndex != 1;
 
-    return Scaffold(
-      key: _scaffoldKey,
-      drawer: const _NavigationDrawer(),
-      appBar: showAppBar
-          ? AppBar(
+    return PopScope(
+      canPop: _currentTabIndex == 0,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        setState(() => _currentTabIndex = 0);
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
+        drawer: const _NavigationDrawer(),
+        appBar: showAppBar
+            ? AppBar(
               title: Text(
                 _currentTabIndex == 0
                     ? 'Summary'
@@ -62,13 +85,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               centerTitle: true,
             )
           : null,
-      body: _tabs[_currentTabIndex],
+      body: _buildBody(context),
+      ),
     );
   }
 }
 
 class _DashboardTab extends ConsumerWidget {
-  const _DashboardTab();
+  final Function(int?) onNavigate;
+
+  const _DashboardTab({required this.onNavigate});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -83,6 +109,7 @@ class _DashboardTab extends ConsumerWidget {
         onRefresh: () async {
           await ref.read(dashboardProvider.notifier).loadStats();
           await ref.read(attendanceProvider.notifier).loadAttendance();
+          await ref.read(transfersProvider.notifier).loadTransfers();
         },
         child: dashState.when(
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -171,6 +198,87 @@ class _DashboardTab extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
+
+                  // --- Start Delivery / Transfer Requests ---
+                  if (shiftStarted) ...[
+                    Consumer(
+                      builder: (context, ref, child) {
+                        final runState = ref.watch(runProvider);
+                        final transState = ref.watch(transfersProvider);
+                        
+                        return Column(
+                          children: [
+                            Card(
+                              elevation: 0.5,
+                              color: AppColors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(4),
+                                side: const BorderSide(color: Color(0xFFE2E4E8)),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      runState.isDeliveryStarted ? 'Delivery run is locked.' : 'Start delivery to lock run.',
+                                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.greyDarkest),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 48,
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: runState.isDeliveryStarted ? const Color(0xFFFF6B6B) : AppColors.green,
+                                          foregroundColor: AppColors.white,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                        ),
+                                        onPressed: runState.isLoading ? null : () async {
+                                          if (runState.isDeliveryStarted) {
+                                            if (stats.deliveryTotal != stats.deliveryCompleted + stats.returned + stats.onHold + stats.exchange + stats.partialDelivery + stats.drto) {
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Finish all pending parcels to end delivery!'), backgroundColor: AppColors.statusBad));
+                                              return;
+                                            }
+                                            await ref.read(runProvider.notifier).endDelivery();
+                                          } else {
+                                            await ref.read(runProvider.notifier).startDelivery();
+                                          }
+                                        },
+                                        child: runState.isLoading
+                                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                            : Text(runState.isDeliveryStarted ? 'END DELIVERY' : 'START DELIVERY', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            if (runState.isDeliveryStarted && transState.requests.isNotEmpty)
+                              ...transState.requests.map((req) => Card(
+                                color: Colors.amber.shade50,
+                                margin: const EdgeInsets.only(bottom: 8),
+                                child: ListTile(
+                                  title: Text('Transfer: ${req.consignmentId}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  subtitle: Text('From Admin\nAmount: \u09f3${req.amount}'),
+                                  trailing: ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+                                    onPressed: transState.isLoading ? null : () async {
+                                      final err = await ref.read(transfersProvider.notifier).acceptTransfer(req.id);
+                                      if (err == null && context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Parcel Accepted!'), backgroundColor: AppColors.statusGood));
+                                      }
+                                    },
+                                    child: const Text('Accept'),
+                                  ),
+                                ),
+                              )),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
       
                   // Date Selection Card
                   Card(
@@ -254,15 +362,16 @@ class _DashboardTab extends ConsumerWidget {
                         'DELIVERY TARGET',
                         '${stats.deliveryCompleted} / ${stats.deliveryTotal}',
                         context,
+                        onTap: () => onNavigate(null), // clears filter
                       ),
-                      _buildGridCard('PENDING', '${stats.pending}'),
-                      _buildGridCard('PRICE CHANGE', '${stats.priceChange}'),
-                      _buildGridCard('RETURN', '${stats.returned}'),
-                      _buildGridCard('PARTIAL DELIVERY', '${stats.partialDelivery}'),
-                      _buildGridCard('ON HOLD', '${stats.onHold}'),
-                      _buildGridCard('DELIVERED', '${stats.delivered}'),
-                      _buildGridCard('DRTO', '${stats.drto}'),
-                      _buildGridCard('EXCHANGE', '${stats.exchange}'),
+                      _buildGridCard('PENDING', '${stats.pending}', onTap: () => onNavigate(DeliveryStatus.pending)),
+                      _buildGridCard('PRICE CHANGE', '${stats.priceChange}', onTap: () => onNavigate(DeliveryStatus.priceChange)),
+                      _buildGridCard('RETURN', '${stats.returned}', onTap: () => onNavigate(DeliveryStatus.returned)),
+                      _buildGridCard('PARTIAL DELIVERY', '${stats.partialDelivery}', onTap: () => onNavigate(DeliveryStatus.partialDelivery)),
+                      _buildGridCard('ON HOLD', '${stats.onHold}', onTap: () => onNavigate(DeliveryStatus.onHold)),
+                      _buildGridCard('DELIVERED', '${stats.delivered}', onTap: () => onNavigate(DeliveryStatus.delivered)),
+                      _buildGridCard('DRTO', '${stats.drto}', onTap: () => onNavigate(DeliveryStatus.drto)),
+                      _buildGridCard('EXCHANGE', '${stats.exchange}', onTap: () => onNavigate(DeliveryStatus.exchange)),
                     ],
                   ),
                 ],
@@ -274,7 +383,7 @@ class _DashboardTab extends ConsumerWidget {
     );
   }
 
-  Widget _buildGridCard(String label, String value) {
+  Widget _buildGridCard(String label, String value, {VoidCallback? onTap}) {
     return Card(
       elevation: 0.5,
       color: AppColors.white,
@@ -282,19 +391,60 @@ class _DashboardTab extends ConsumerWidget {
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: Color(0xFFE2E4E8)),
       ),
-      child: Center(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFFC06A14), // Dark orange/brown color from screenshot
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.greyDarkest,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGridCardWithDetails(String label, String value, BuildContext context, {VoidCallback? onTap}) {
+    return Card(
+      elevation: 0.5,
+      color: AppColors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4),
+        side: const BorderSide(color: Color(0xFFE2E4E8)),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
               label,
               style: const TextStyle(
-                color: Color(0xFFC06A14), // Dark orange/brown color from screenshot
+                color: Color(0xFFC06A14),
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Text(
               value,
               style: const TextStyle(
@@ -303,58 +453,17 @@ class _DashboardTab extends ConsumerWidget {
                 color: AppColors.greyDarkest,
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGridCardWithDetails(String label, String value, BuildContext context) {
-    return Card(
-      elevation: 0.5,
-      color: AppColors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(4),
-        side: const BorderSide(color: Color(0xFFE2E4E8)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFC06A14),
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w500,
-              color: AppColors.greyDarkest,
-            ),
-          ),
-          const SizedBox(height: 4),
-          GestureDetector(
-            onTap: () {
-              // Programmatically click target - trigger tab transition in parent
-              // We'll just push the deliveries route for the demo
-              context.push('/deliveries');
-            },
-            child: const Text(
+            const SizedBox(height: 4),
+            const Text(
               'SEE DETAILS',
               style: TextStyle(
                 color: Color(0xFFDD3444),
                 fontWeight: FontWeight.bold,
-                fontSize: 11,
-                decoration: TextDecoration.none,
+                fontSize: 10,
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -523,7 +632,7 @@ class _NavigationDrawer extends ConsumerWidget {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Text(
-              'Version 7.1.2',
+              'Version 7.1.3 (Fixed)',
               style: TextStyle(color: AppColors.greyDark, fontSize: 13),
             ),
           ),

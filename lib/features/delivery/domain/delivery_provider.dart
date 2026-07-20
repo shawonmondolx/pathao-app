@@ -70,6 +70,8 @@ class Consignment {
   /// True if QR scanning is required for this run before taking action.
   /// Some hubs (e.g. Bhaluka, Savar) set this to false and accept proceed_method=1 directly.
   final bool isScanRequired;
+  /// Total parcel count in this order (used for partial delivery count hint).
+  final int? totalItems;
 
   Consignment({
     required this.id,
@@ -96,6 +98,7 @@ class Consignment {
     this.paymentLink,
     this.isDocument = false,
     this.isScanRequired = true,
+    this.totalItems,
   });
 
   Consignment copyWith({
@@ -127,6 +130,7 @@ class Consignment {
       paymentLink: paymentLink,
       isDocument: isDocument,
       isScanRequired: isScanRequired,
+      totalItems: totalItems,
     );
   }
 
@@ -164,6 +168,7 @@ class Consignment {
       isScanRequired: json['is_scan_required'] != false &&
           json['isScanRequired'] != false &&
           json['da_scan_required'] != false,
+      totalItems: json['total_items'] ?? json['item_count'] ?? json['quantity'],
     );
   }
 }
@@ -218,8 +223,16 @@ class DeliveryState {
 // ─────────────────────────────────────────────────────────────────────────────
 String _extractError(Object e, String fallback) {
   if (e is DioException) {
+    final statusCode = e.response?.statusCode;
     final data = e.response?.data;
     if (data is Map) {
+      if (statusCode == 422 || statusCode == 400) {
+        final msg = data['message'] ?? '';
+        if (msg.toString().toLowerCase().contains('otp')) {
+          return 'REQUIRE_OTP';
+        }
+      }
+      
       // Handle nested validation errors: {"errors": {"field": ["msg"]}}
       final errors = data['errors'];
       if (errors is Map && errors.isNotEmpty) {
@@ -228,14 +241,20 @@ String _extractError(Object e, String fallback) {
         final msg = (firstVal is List && firstVal.isNotEmpty)
             ? firstVal.first.toString()
             : firstVal?.toString() ?? '';
+        
+        // Also check if field error is about otp
+        if (msg.toLowerCase().contains('otp') || firstKey.toString().toLowerCase().contains('otp')) {
+          return 'REQUIRE_OTP';
+        }
+        
         return '$msg';
       }
       final errField = data['error'];
       return data['message'] ??
           (errField is Map ? errField['description'] : errField?.toString()) ??
-          'HTTP ${e.response?.statusCode}: $fallback';
+          'HTTP ${statusCode}: $fallback';
     }
-    return 'HTTP ${e.response?.statusCode ?? 'No Response'}: $fallback';
+    return 'HTTP ${statusCode ?? 'No Response'}: $fallback';
   }
   return fallback;
 }
@@ -540,13 +559,17 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
 
   // ───────────────────────────────────────────────────────────────────────────
   // INITIATE RETURN — POST /api/v1/user/delivery (NOT PUT)
-  // Tries FormData first (matching Hermes bundle behaviour), then JSON.
+  // otpType: 'store_otp_number' (merchant) or 'customer' depending on who
+  // the original app's "Universal OTP Target Selection" sends to.
+  // otp: optional — only provided when the user has already entered an OTP.
   // ───────────────────────────────────────────────────────────────────────────
   Future<String?> initiateReturn({
     required String consignmentId,
     required int runOrderId,
     required String reason,
     int proceedMethod = ProceedMethod.general,
+    String otpType = OtpType.storeOtpNumber,
+    String? otp,
   }) async {
     if (runOrderId <= 0) {
       return 'Invalid run order ID ($runOrderId). Cannot initiate return.';
@@ -557,14 +580,15 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
       'run_order_id': runOrderId,
       'status': DeliveryStatus.returned,
       'reason': reason,
-      'otp_type': OtpType.storeOtpNumber, // Add required otp_type field
+      'otp_type': otpType,
+      if (otp != null && otp.isNotEmpty) 'otp': otp,
       if (proceedMethod != 0) 'proceed_method': proceedMethod,
     });
 
     try {
       print('=== INITIATE RETURN REQUEST ===');
       print('URL: ${ApiEndpoints.deliveryUpdate}');
-      print('PAYLOAD: run_order_id=$runOrderId, status=${DeliveryStatus.returned}, reason=$reason');
+      print('PAYLOAD: run_order_id=$runOrderId, status=${DeliveryStatus.returned}, reason=$reason, otp_type=$otpType');
 
       final response = await dioClient.dio.post(
         ApiEndpoints.deliveryUpdate,
@@ -586,14 +610,6 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
       if (e is DioException) {
         print('STATUS: ${e.response?.statusCode}');
         print('DATA: ${e.response?.data}');
-        final statusCode = e.response?.statusCode;
-        final data = e.response?.data;
-        if (statusCode == 422 || statusCode == 400) {
-          final msg = data is Map ? (data['message'] ?? '') : '';
-          if (msg.toString().toLowerCase().contains('otp')) {
-            return 'REQUIRE_OTP';
-          }
-        }
       }
       return _extractError(e, 'Failed to initiate return');
     }
@@ -682,28 +698,75 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // PARTIAL DELIVERY — POST /api/v1/user/delivery/check, status=5
+  // RETURN SMS RESEND — POST /api/v1/user/return-sms-resend
+  // Separate endpoint for return OTP resend (distinct from delivery sms-resend)
+  // ───────────────────────────────────────────────────────────────────────────
+  Future<bool> returnSmsResend({
+    required int runOrderId,
+    String otpType = OtpType.storeOtpNumber,
+  }) async {
+    try {
+      final dioClient = DioClient();
+      final payload = <String, dynamic>{
+        'run_order_id': runOrderId,
+        'otp_type': otpType,
+      };
+
+      print('=== RETURN SMS RESEND REQUEST ===');
+      print('URL: ${ApiEndpoints.returnSmsResend}');
+      print('PAYLOAD: $payload');
+
+      final response = await dioClient.dio.post(
+        ApiEndpoints.returnSmsResend,
+        data: payload,
+        options: Options(headers: {'Content-Type': 'application/json'}),
+      );
+
+      print('=== RETURN SMS RESEND RESPONSE ===');
+      print('STATUS: ${response.statusCode}');
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print('=== RETURN SMS RESEND ERROR ===');
+      if (e is DioException) {
+        print('STATUS: ${e.response?.statusCode}');
+        print('DATA: ${e.response?.data}');
+      }
+      return false;
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // PARTIAL DELIVERY — POST /api/v1/user/delivery/check, status=7
+  // Always requires Merchant OTP + collected_amount + delivered_parcel_count
   // ───────────────────────────────────────────────────────────────────────────
   Future<String?> sendPartialDelivery({
     required String consignmentId,
     required int runOrderId,
     required double collectedAmount,
+    required int deliveredCount,
+    required String otp,
+    String otpType = OtpType.storeOtpNumber,
   }) async {
     try {
       final dioClient = DioClient();
 
-      // ✅ JSON body, correct fields
       final payload = <String, dynamic>{
         'run_order_id': runOrderId,
-        'status': DeliveryStatus.partialDelivery, // PARTIAL_DELIVERY (7)
+        'status': DeliveryStatus.partialDelivery, // 7
         'collected_amount': collectedAmount.toInt(),
-        'otp_type': OtpType.storeOtpNumber, // ✅ correct
-        'proceed_method': ProceedMethod.general, // ✅ int
+        'delivered_parcel_count': deliveredCount,
+        'otp_type': otpType,
+        'otp': otp,
+        'proceed_method': ProceedMethod.general,
       };
+
+      print('=== PARTIAL DELIVERY REQUEST ===');
+      print('URL: ${ApiEndpoints.deliveryComplete}');
+      print('PAYLOAD: run_order_id=$runOrderId, status=${DeliveryStatus.partialDelivery}, amount=${collectedAmount.toInt()}, count=$deliveredCount');
 
       final response = await dioClient.dio.post(
         ApiEndpoints.deliveryComplete,
-        data: payload, // ✅ JSON not FormData
+        data: payload,
         options: Options(headers: {'Content-Type': 'application/json'}),
       );
 
@@ -790,24 +853,33 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
 
 
   // ───────────────────────────────────────────────────────────────────────────
-  // PRICE CHANGE — POST /api/v1/user/delivery/check, status=7
+  // PRICE CHANGE — POST /api/v1/user/delivery/check, status=8
+  // Requires Merchant OTP (v2.md section 3: "Price Change: Requires ... Merchant's OTP")
   // ───────────────────────────────────────────────────────────────────────────
   Future<String?> sendPriceChange({
     required String consignmentId,
     required int runOrderId,
     required double newAmount,
+    required String otp,
+    String otpType = OtpType.storeOtpNumber,
+    String? reason,
   }) async {
     try {
       final dioClient = DioClient();
 
-      // ✅ JSON, correct fields
       final payload = <String, dynamic>{
         'run_order_id': runOrderId,
         'status': DeliveryStatus.priceChange, // PRICE_CHANGE (8)
-        'collected_amount': newAmount,
-        'otp_type': OtpType.storeOtpNumber, // ✅ correct
-        'proceed_method': ProceedMethod.general, // ✅ int
+        'collected_amount': newAmount.toInt(),
+        'otp_type': otpType,
+        'otp': otp,
+        'proceed_method': ProceedMethod.general,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
       };
+
+      print('=== PRICE CHANGE REQUEST ===');
+      print('URL: ${ApiEndpoints.deliveryComplete}');
+      print('PAYLOAD: run_order_id=$runOrderId, status=${DeliveryStatus.priceChange}, amount=${newAmount.toInt()}');
 
       final response = await dioClient.dio.post(
         ApiEndpoints.deliveryComplete,
@@ -826,24 +898,29 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // EXCHANGE — POST /api/v1/user/delivery/check, status=8
+  // EXCHANGE — POST /api/v1/user/delivery/check, status=10
+  // Requires Merchant OTP only — no amount, no reason
   // ───────────────────────────────────────────────────────────────────────────
   Future<String?> sendExchange({
     required String consignmentId,
     required int runOrderId,
-    required double collectedAmount,
+    required String otp,
+    String otpType = OtpType.storeOtpNumber,
   }) async {
     try {
       final dioClient = DioClient();
 
-      // ✅ JSON, correct fields
       final payload = <String, dynamic>{
         'run_order_id': runOrderId,
         'status': DeliveryStatus.exchange, // EXCHANGE (10)
-        'collected_amount': collectedAmount.toInt(),
-        'otp_type': OtpType.storeOtpNumber, // ✅ correct
-        'proceed_method': ProceedMethod.general, // ✅ int
+        'otp_type': otpType,
+        'otp': otp,
+        'proceed_method': ProceedMethod.general,
       };
+
+      print('=== EXCHANGE REQUEST ===');
+      print('URL: ${ApiEndpoints.deliveryComplete}');
+      print('PAYLOAD: run_order_id=$runOrderId, status=${DeliveryStatus.exchange}, otp=***');
 
       final response = await dioClient.dio.post(
         ApiEndpoints.deliveryComplete,

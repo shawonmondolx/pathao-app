@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'dart:async';
 import 'dart:io';
 import '../../../core/constants/app_colors.dart';
@@ -29,7 +28,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
   bool _isUnlocked = false;          // true once QR scan succeeds
   int _proceedMethod = 2;            // 2 = QR_SCAN (set by setDaMarkScanProceedMethod)
   Timer? _unlockTimer;               // auto-re-locks after 15 min
-  DateTime? _unlockExpiry;           // for countdown display
+  // ─────────────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────────────
 
   @override
@@ -45,14 +44,12 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
     setState(() {
       _isUnlocked = true;
       _proceedMethod = ProceedMethod.qrScan; // 2 = QR_SCAN
-      _unlockExpiry = DateTime.now().add(_scanUnlockDuration);
     });
     // Auto-relock after 15 min (matching the real app timer)
     _unlockTimer = Timer(_scanUnlockDuration, () {
       if (mounted) {
         setState(() {
           _isUnlocked = false;
-          _unlockExpiry = null;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -116,7 +113,19 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
                           );
                       if (context.mounted) {
                         Navigator.pop(context);
-                        _showResultSnackbar(error, successMsg: 'Status updated to On Hold!');
+                        if (error == 'REQUIRE_OTP') {
+                          context.push(
+                            '/delivery/${item.id}/otp',
+                            extra: {
+                              'runOrderId': item.runOrderId,
+                              'recipientPhone': item.recipientPhone,
+                              'collectedAmount': 0.0,
+                              'status': 3, // Hold status
+                            },
+                          );
+                        } else {
+                          _showResultSnackbar(error, successMsg: 'Status updated to On Hold!');
+                        }
                       }
                     },
               child: isSubmitting
@@ -154,37 +163,93 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: reasons.map((reason) {
-                return RadioListTile<String>(
-                  title: Text(reason),
-                  value: reason,
-                  groupValue: selectedReason,
-                  onChanged: (val) => setDialogState(() => selectedReason = val),
-                );
-              }).toList(),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Select return reason:',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                ...reasons.map((reason) {
+                  return RadioListTile<String>(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(reason, style: const TextStyle(fontSize: 14)),
+                    value: reason,
+                    groupValue: selectedReason,
+                    onChanged: (val) =>
+                        setDialogState(() => selectedReason = val),
+                  );
+                }),
+              ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel')),
             ElevatedButton(
               onPressed: selectedReason == null
                   ? null
                   : () async {
                       Navigator.pop(dialogCtx);
+                      // ── Step 1: fire the return API immediately (one-click for most parcels) ──
                       showDialog(
                         context: screenCtx,
                         barrierDismissible: false,
-                        builder: (_) => const Center(child: CircularProgressIndicator()),
+                        builder: (_) =>
+                            const Center(child: CircularProgressIndicator()),
                       );
-                      final errorMsg = await ref.read(deliveryProvider.notifier).initiateReturn(
+                      final errorMsg = await ref
+                          .read(deliveryProvider.notifier)
+                          .initiateReturn(
                             consignmentId: item.id,
                             runOrderId: item.runOrderId,
                             reason: selectedReason!,
-                            proceedMethod: _proceedMethod, // pass scan method
+                            proceedMethod: _proceedMethod,
                           );
-                      if (screenCtx.mounted) {
-                        Navigator.pop(screenCtx);
-                        _showResultSnackbar(errorMsg, successMsg: 'Return initiated successfully!');
+                      if (!screenCtx.mounted) return;
+                      Navigator.pop(screenCtx); // dismiss loading
+
+                      if (errorMsg == null) {
+                        // ✅ One-click return — no OTP needed
+                        _showResultSnackbar(null,
+                            successMsg: 'Return initiated successfully!');
+                      } else if (errorMsg == 'REQUIRE_OTP') {
+                        // ── Step 2 (only if server demands OTP): ask merchant or customer ──
+                        final otpTarget = await showDialog<String>(
+                          context: screenCtx,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('OTP Confirmation Required'),
+                            content: const Text(
+                                'This parcel requires OTP confirmation.\nWho should receive the OTP?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(ctx, 'merchant'),
+                                child: const Text('Merchant'),
+                              ),
+                              ElevatedButton(
+                                onPressed: () =>
+                                    Navigator.pop(ctx, 'customer'),
+                                child: const Text('Customer'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (otpTarget != null && screenCtx.mounted) {
+                          screenCtx.push(
+                            '/delivery/${item.id}/otp',
+                            extra: {
+                              'runOrderId': item.runOrderId,
+                              'recipientPhone': item.recipientPhone,
+                              'collectedAmount': 0.0,
+                              'status': DeliveryStatus.returned,
+                              'otpTarget': otpTarget,
+                            },
+                          );
+                        }
+                      } else {
+                        // Other API error
+                        _showResultSnackbar(errorMsg);
                       }
                     },
               child: const Text('Confirm'),
@@ -377,219 +442,473 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           // Normal parcel: go back to delivery list
           if (screenCtx.mounted) screenCtx.pop();
         }
+      } else if (error == 'REQUIRE_OTP') {
+        screenCtx.push(
+          '/delivery/${item.id}/otp',
+          extra: {
+            'runOrderId': item.runOrderId,
+            'recipientPhone': item.recipientPhone,
+            'collectedAmount': confirmed,
+            'status': 1, // Delivery status
+          },
+        );
       } else {
         _showResultSnackbar(error);
       }
     }
   }
 
-  void _showManualDeliveryDialog(Consignment item) {
-    final screenCtx = context;
-    final amountController = TextEditingController(
-      text: item.amount.toStringAsFixed(0),
-    );
-    showDialog(
-      context: screenCtx,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Confirm Delivery Amount'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Consignment: ${item.id}',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            const Text(
-              'No QR scan — proceed_method: GENERAL',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: amountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Received Amount',
-                prefixText: '\u09f3 ',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.check),
-            label: const Text('Mark Delivered'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.green,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () async {
-              final amount = double.tryParse(amountController.text) ?? item.amount;
-              Navigator.pop(dialogCtx);
-
-              showDialog(
-                context: screenCtx,
-                barrierDismissible: false,
-                builder: (_) => const Center(child: CircularProgressIndicator()),
-              );
-
-              final error = await ref
-                  .read(deliveryProvider.notifier)
-                  .verifyDeliveryOtp(
-                    consignmentId: item.id,
-                    runOrderId: item.runOrderId,
-                    collectedAmount: amount,
-                    otp: '',
-                    status: DeliveryStatus.delivered,
-                  );
-
-              if (screenCtx.mounted) {
-                Navigator.pop(screenCtx);
-                _showResultSnackbar(error, successMsg: 'Delivered successfully!');
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
 
   void _showPartialDeliveryDialog(Consignment item) {
     final screenCtx = context;
-    final amountController = TextEditingController(text: item.amount.toStringAsFixed(0));
+    final amountController =
+        TextEditingController(text: item.amount.toStringAsFixed(0));
+    final countController = TextEditingController(text: '1');
+    final otpController = TextEditingController();
+    bool isLoading = false;
+    bool otpSent = false;
+
     showDialog(
       context: screenCtx,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Partial Delivery'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Enter the amount collected for partial delivery:'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: amountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Received Amount',
-                prefixText: '৳ ',
-                border: OutlineInputBorder(),
-              ),
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (_, setDialogState) => AlertDialog(
+          title: const Text('Partial Delivery'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Amount collected ───────────────────────────────────────
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Collected Amount',
+                    prefixText: '৳ ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // ── Delivered parcel count ─────────────────────────────────
+                TextField(
+                  controller: countController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Parcels Delivered',
+                    hintText: 'Out of ${item.totalItems ?? '?'} total',
+                    border: const OutlineInputBorder(),
+                    suffixText: 'pcs',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ── Merchant OTP ───────────────────────────────────────────
+                const Text('Merchant OTP',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 4,
+                        decoration: const InputDecoration(
+                          labelText: '4-digit OTP',
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 14),
+                      ),
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              setDialogState(() => isLoading = true);
+                              final messenger = ScaffoldMessenger.of(screenCtx);
+                              final ok = await ref
+                                  .read(deliveryProvider.notifier)
+                                  .resendOtpSms(runOrderId: item.runOrderId);
+                              setDialogState(() {
+                                isLoading = false;
+                                otpSent = ok;
+                              });
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(ok
+                                      ? '✅ OTP sent to merchant'
+                                      : '❌ Failed to send OTP'),
+                                  backgroundColor: ok
+                                      ? AppColors.statusGood
+                                      : AppColors.statusBad,
+                                ),
+                              );
+                            },
+                      child: const Text('Send OTP',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+                if (otpSent)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('OTP sent to merchant',
+                        style: TextStyle(color: Colors.green, fontSize: 12)),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                      final amount =
+                          double.tryParse(amountController.text) ?? 0;
+                      final count =
+                          int.tryParse(countController.text) ?? 1;
+                      final otp = otpController.text.trim();
+                      if (otp.length != 4) {
+                        ScaffoldMessenger.of(screenCtx).showSnackBar(
+                          const SnackBar(
+                              content: Text(
+                                  'Please enter the 4-digit merchant OTP')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => isLoading = true);
+                      Navigator.pop(dialogCtx);
+                      showDialog(
+                        context: screenCtx,
+                        barrierDismissible: false,
+                        builder: (_) =>
+                            const Center(child: CircularProgressIndicator()),
+                      );
+                      final error = await ref
+                          .read(deliveryProvider.notifier)
+                          .sendPartialDelivery(
+                            consignmentId: item.id,
+                            runOrderId: item.runOrderId,
+                            collectedAmount: amount,
+                            deliveredCount: count,
+                            otp: otp,
+                          );
+                      if (screenCtx.mounted) {
+                        Navigator.pop(screenCtx);
+                        _showResultSnackbar(error,
+                            successMsg: 'Partial delivery submitted!');
+                      }
+                    },
+              child: const Text('Confirm'),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final amount = double.tryParse(amountController.text) ?? 0;
-              Navigator.pop(dialogCtx);
-              showDialog(
-                context: screenCtx,
-                barrierDismissible: false,
-                builder: (_) => const Center(child: CircularProgressIndicator()),
-              );
-              final error = await ref.read(deliveryProvider.notifier).sendPartialDelivery(
-                consignmentId: item.id,
-                runOrderId: item.runOrderId,
-                collectedAmount: amount,
-              );
-              if (screenCtx.mounted) {
-                Navigator.pop(screenCtx);
-                _showResultSnackbar(error, successMsg: 'Partial delivery submitted!');
-              }
-            },
-            child: const Text('Confirm'),
-          ),
-        ],
       ),
     );
   }
 
   void _showPriceChangeDialog(Consignment item) {
     final screenCtx = context;
-    final amountController = TextEditingController(text: item.amount.toStringAsFixed(0));
+    final amountController =
+        TextEditingController(text: item.amount.toStringAsFixed(0));
+    final reasonController = TextEditingController();
+    final otpController = TextEditingController();
+    bool isLoading = false;
+    bool otpSent = false;
+
     showDialog(
       context: screenCtx,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Price Change'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Original amount: ৳ ${item.amount.toStringAsFixed(2)}'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: amountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'New Amount',
-                prefixText: '৳ ',
-                border: OutlineInputBorder(),
-              ),
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (_, setDialogState) => AlertDialog(
+          title: const Text('Price Change'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Original amount: ৳ ${item.amount.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'New Amount',
+                    prefixText: '৳ ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reasonController,
+                  decoration: const InputDecoration(
+                    labelText: 'Reason (required)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ── Merchant OTP section ────────────────────────────────────
+                const Text('Merchant OTP',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 4,
+                        decoration: const InputDecoration(
+                          labelText: '4-digit OTP',
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 14),
+                      ),
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              setDialogState(() => isLoading = true);
+                              final messenger = ScaffoldMessenger.of(screenCtx);
+                              final ok = await ref
+                                  .read(deliveryProvider.notifier)
+                                  .resendOtpSms(runOrderId: item.runOrderId);
+                              setDialogState(() {
+                                isLoading = false;
+                                otpSent = ok;
+                              });
+                              if (dialogCtx.mounted) {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text(ok
+                                        ? '✅ OTP sent to merchant'
+                                        : '❌ Failed to send OTP'),
+                                    backgroundColor: ok
+                                        ? AppColors.statusGood
+                                        : AppColors.statusBad,
+                                  ),
+                                );
+                              }
+                            },
+                      child: const Text('Send OTP',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+                if (otpSent)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('OTP sent to merchant',
+                        style: TextStyle(color: Colors.green, fontSize: 12)),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                      final amount =
+                          double.tryParse(amountController.text) ??
+                              item.amount;
+                      final reason = reasonController.text.trim();
+                      final otp = otpController.text.trim();
+                      if (reason.length < 3) {
+                        ScaffoldMessenger.of(screenCtx).showSnackBar(
+                          const SnackBar(
+                              content: Text('Reason must be at least 3 characters')),
+                        );
+                        return;
+                      }
+                      if (otp.length != 4) {
+                        ScaffoldMessenger.of(screenCtx).showSnackBar(
+                          const SnackBar(
+                              content: Text('Please enter the 4-digit merchant OTP')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => isLoading = true);
+                      Navigator.pop(dialogCtx);
+                      showDialog(
+                        context: screenCtx,
+                        barrierDismissible: false,
+                        builder: (_) =>
+                            const Center(child: CircularProgressIndicator()),
+                      );
+                      final error = await ref
+                          .read(deliveryProvider.notifier)
+                          .sendPriceChange(
+                            consignmentId: item.id,
+                            runOrderId: item.runOrderId,
+                            newAmount: amount,
+                            otp: otp,
+                            reason: reason,
+                          );
+                      if (screenCtx.mounted) {
+                        Navigator.pop(screenCtx);
+                        _showResultSnackbar(error,
+                            successMsg: 'Price change submitted!');
+                      }
+                    },
+              child: const Text('Confirm'),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final amount = double.tryParse(amountController.text) ?? item.amount;
-              Navigator.pop(dialogCtx);
-              showDialog(
-                context: screenCtx,
-                barrierDismissible: false,
-                builder: (_) => const Center(child: CircularProgressIndicator()),
-              );
-              final error = await ref.read(deliveryProvider.notifier).sendPriceChange(
-                consignmentId: item.id,
-                runOrderId: item.runOrderId,
-                newAmount: amount,
-              );
-              if (screenCtx.mounted) {
-                Navigator.pop(screenCtx);
-                _showResultSnackbar(error, successMsg: 'Price change submitted!');
-              }
-            },
-            child: const Text('Confirm'),
-          ),
-        ],
       ),
     );
   }
 
   void _showExchangeConfirmDialog(Consignment item) {
     final screenCtx = context;
+    final otpController = TextEditingController();
+    bool isLoading = false;
+    bool otpSent = false;
+
     showDialog(
       context: screenCtx,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Exchange'),
-        content: Text('Confirm exchange for consignment ${item.id}?\n\nAmount: ৳ ${item.amount.toStringAsFixed(2)}'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(dialogCtx);
-              showDialog(
-                context: screenCtx,
-                barrierDismissible: false,
-                builder: (_) => const Center(child: CircularProgressIndicator()),
-              );
-              final error = await ref.read(deliveryProvider.notifier).sendExchange(
-                consignmentId: item.id,
-                runOrderId: item.runOrderId,
-                collectedAmount: item.amount,
-              );
-              if (screenCtx.mounted) {
-                Navigator.pop(screenCtx);
-                _showResultSnackbar(error, successMsg: 'Exchange submitted successfully!');
-              }
-            },
-            child: const Text('Confirm Exchange'),
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (_, setDialogState) => AlertDialog(
+          title: const Text('Exchange'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Consignment: ${item.id}',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 4),
+                Text('Recipient: ${item.recipientName}',
+                    style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 16),
+                const Text('Merchant OTP Required',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, color: Colors.teal)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 4,
+                        decoration: const InputDecoration(
+                          labelText: '4-digit OTP',
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 14),
+                      ),
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              setDialogState(() => isLoading = true);
+                              final messenger = ScaffoldMessenger.of(screenCtx);
+                              final ok = await ref
+                                  .read(deliveryProvider.notifier)
+                                  .resendOtpSms(runOrderId: item.runOrderId);
+                              setDialogState(() {
+                                isLoading = false;
+                                otpSent = ok;
+                              });
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(ok
+                                      ? '✅ OTP sent to merchant'
+                                      : '❌ Failed to send OTP'),
+                                  backgroundColor: ok
+                                      ? AppColors.statusGood
+                                      : AppColors.statusBad,
+                                ),
+                              );
+                            },
+                      child: const Text('Send OTP',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+                if (otpSent)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('OTP sent to merchant',
+                        style: TextStyle(color: Colors.green, fontSize: 12)),
+                  ),
+              ],
+            ),
           ),
-        ],
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal, foregroundColor: Colors.white),
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                      final otp = otpController.text.trim();
+                      if (otp.length != 4) {
+                        ScaffoldMessenger.of(screenCtx).showSnackBar(
+                          const SnackBar(
+                              content: Text(
+                                  'Please enter the 4-digit merchant OTP')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => isLoading = true);
+                      Navigator.pop(dialogCtx);
+                      showDialog(
+                        context: screenCtx,
+                        barrierDismissible: false,
+                        builder: (_) =>
+                            const Center(child: CircularProgressIndicator()),
+                      );
+                      final error = await ref
+                          .read(deliveryProvider.notifier)
+                          .sendExchange(
+                            consignmentId: item.id,
+                            runOrderId: item.runOrderId,
+                            otp: otp,
+                          );
+                      if (screenCtx.mounted) {
+                        Navigator.pop(screenCtx);
+                        _showResultSnackbar(error,
+                            successMsg: 'Exchange submitted successfully!');
+                      }
+                    },
+              child: const Text('Confirm Exchange'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -676,16 +995,6 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
     final order = item;
 
     _amountController.text = order.amount.toStringAsFixed(0);
-
-    final String _rawStatus = order.status.toString().toUpperCase().trim();
-    // Replicate StatusBadge logic to ensure they match exactly
-    String _statusStr = _rawStatus;
-    if (_rawStatus == '1') _statusStr = 'PENDING';
-    if (_rawStatus == '2') _statusStr = 'DELIVERED';
-    if (_rawStatus == '3') _statusStr = 'ON HOLD';
-    if (_rawStatus == '4') _statusStr = 'RETURNED';
-
-    final bool isActive = _statusStr.contains('PENDING') || _statusStr.contains('HOLD') || _rawStatus == '1' || _rawStatus == '3';
 
     return Scaffold(
       appBar: AppBar(
@@ -852,6 +1161,22 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 8),
+                          // Price Change — new amount + reason + merchant OTP required
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.price_change, size: 18),
+                              label: const Text('Price Change'),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.orange),
+                                foregroundColor: Colors.orange,
+                                minimumSize: const Size(0, 44),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: () => _showPriceChangeDialog(order),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -861,7 +1186,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
                   if (order.holdReason != null && order.status == 3) ...[
                     const SizedBox(height: 16),
                     Card(
-                      color: AppColors.orangeLight.withOpacity(0.1),
+                      color: AppColors.orangeLight.withValues(alpha: 0.1),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(

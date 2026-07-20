@@ -14,6 +14,14 @@ class OtpScreen extends ConsumerStatefulWidget {
   final double collectedAmount;
   final int status;
 
+  /// If true, shows a "Submit to QC" button below Verify.
+  /// Should only be true when this OTP screen was opened for a QC-related action.
+  final bool needsQcButton;
+
+  /// 'merchant' → uses store_otp_number otp_type + delivery sms-resend
+  /// 'customer' → uses 'customer' otp_type + return sms-resend endpoint
+  final String otpTarget;
+
   const OtpScreen({
     super.key,
     required this.consignmentId,
@@ -21,6 +29,8 @@ class OtpScreen extends ConsumerStatefulWidget {
     required this.recipientPhone,
     required this.collectedAmount,
     required this.status,
+    this.needsQcButton = false,
+    this.otpTarget = 'merchant',
   });
 
   @override
@@ -34,6 +44,12 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   String _otpCode = '';
   bool _isLoading = false;
 
+  String get _otpType =>
+      widget.otpTarget == 'customer' ? 'customer' : OtpType.storeOtpNumber;
+
+  String get _targetLabel =>
+      widget.otpTarget == 'customer' ? 'customer' : 'merchant';
+
   @override
   void initState() {
     super.initState();
@@ -44,10 +60,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
 
   Future<void> _sendInitialOtp() async {
     setState(() => _isLoading = true);
-    // ✅ Only run_order_id is needed by the real API
-    final success = await ref.read(deliveryProvider.notifier).resendOtpSms(
-      runOrderId: widget.runOrderId,
-    );
+    final success = await _resendViaCorrectEndpoint();
     if (mounted) {
       setState(() => _isLoading = false);
       if (success) {
@@ -64,6 +77,22 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         );
       }
     }
+  }
+
+  // Calls the right resend endpoint based on otpTarget.
+  // Returns (merchant/delivery) → /sms-resend
+  // Returns (customer/return)   → /return-sms-resend
+  Future<bool> _resendViaCorrectEndpoint() {
+    if (widget.otpTarget == 'customer') {
+      return ref.read(deliveryProvider.notifier).returnSmsResend(
+            runOrderId: widget.runOrderId,
+            otpType: 'customer',
+          );
+    }
+    return ref.read(deliveryProvider.notifier).resendOtpSms(
+          runOrderId: widget.runOrderId,
+          otpType: _otpType,
+        );
   }
 
   void _startTimer() {
@@ -87,11 +116,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
 
   void _resendCode() async {
     _startTimer();
-    // ✅ Only run_order_id is needed by the real API
-    final success = await ref.read(deliveryProvider.notifier).resendOtpSms(
-      runOrderId: widget.runOrderId,
-    );
-
+    final success = await _resendViaCorrectEndpoint();
     if (mounted) {
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -99,7 +124,9 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to resend OTP. Please try again.'), backgroundColor: AppColors.statusBad),
+          const SnackBar(
+              content: Text('Failed to resend OTP. Please try again.'),
+              backgroundColor: AppColors.statusBad),
         );
       }
     }
@@ -116,25 +143,34 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     final amount = double.tryParse(_amountController.text) ?? widget.collectedAmount;
 
     setState(() => _isLoading = true);
-    
-    // ✅ Call the real API with correct otp_type
+
     final errorMsg = await ref.read(deliveryProvider.notifier).verifyDeliveryOtp(
-      consignmentId: widget.consignmentId,
-      runOrderId: widget.runOrderId,
-      collectedAmount: amount,
-      otp: _otpCode,
-      status: widget.status,
-      otpType: 'store_otp_number', // ✅ correct value from Pathao bundle
-    );
+          consignmentId: widget.consignmentId,
+          runOrderId: widget.runOrderId,
+          collectedAmount: amount,
+          otp: _otpCode,
+          status: widget.status,
+          otpType: _otpType,
+        );
 
     setState(() => _isLoading = false);
 
     if (mounted) {
       if (errorMsg == null) {
-        // Success
-        context.pushReplacement('/delivery/${widget.consignmentId}/proof');
+        // Only push to proof screen for actual delivery (status=1).
+        // For return/exchange/partial/hold OTP, just pop back.
+        if (widget.status == DeliveryStatus.delivered) {
+          context.pushReplacement('/delivery/${widget.consignmentId}/proof');
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Status confirmed successfully!'),
+              backgroundColor: AppColors.statusGood,
+            ),
+          );
+          context.pop();
+        }
       } else {
-        // Error
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMsg),
@@ -145,7 +181,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     }
   }
 
-  void _submitQc() async {
+  // Only called when needsQcButton == true (QC OTP flow)
+  void _submitQcOtp() async {
     if (_otpCode.length != 4) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a 4-digit OTP')),
@@ -154,20 +191,25 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     }
 
     setState(() => _isLoading = true);
-    
-    // ✅ Uses 'store_otp_number' otp_type by default
+
     final errorMsg = await ref.read(deliveryProvider.notifier).submitQcOtp(
-      consignmentId: widget.consignmentId,
-      runOrderId: widget.runOrderId,
-      otp: _otpCode,
-      otpType: 'store_otp_number',
-    );
+          consignmentId: widget.consignmentId,
+          runOrderId: widget.runOrderId,
+          otp: _otpCode,
+          otpType: _otpType,
+        );
 
     setState(() => _isLoading = false);
 
     if (mounted) {
       if (errorMsg == null) {
-        context.pushReplacement('/delivery/${widget.consignmentId}/proof');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ QC OTP verified! Parcel in QC queue.'),
+            backgroundColor: AppColors.statusGood,
+          ),
+        );
+        context.pop();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(errorMsg), backgroundColor: AppColors.statusBad),
@@ -176,11 +218,28 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     }
   }
 
+  String get _screenTitle {
+    switch (widget.status) {
+      case DeliveryStatus.returned:
+        return 'Return OTP Confirmation';
+      case DeliveryStatus.drto:
+        return 'DRTO OTP Confirmation';
+      case DeliveryStatus.exchange:
+        return 'Exchange OTP Confirmation';
+      case DeliveryStatus.priceChange:
+        return 'Price Change OTP';
+      case DeliveryStatus.partialDelivery:
+        return 'Partial Delivery OTP';
+      default:
+        return 'OTP Verification';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('OTP Verification', style: TextStyle(color: AppColors.white)),
+        title: Text(_screenTitle, style: const TextStyle(color: AppColors.white)),
         iconTheme: const IconThemeData(color: AppColors.white),
         backgroundColor: AppColors.primary,
         centerTitle: true,
@@ -190,29 +249,38 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               AppStrings.confirmationCodeSent,
-              style: TextStyle(fontSize: 16),
+              style: const TextStyle(fontSize: 16),
             ),
             Text(
-              widget.recipientPhone,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primary),
+              widget.recipientPhone.isNotEmpty
+                  ? '${widget.recipientPhone} ($_targetLabel)'
+                  : 'the $_targetLabel',
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  color: AppColors.primary),
             ),
             const SizedBox(height: 32),
-            
-            // Received Amount Field
-            TextField(
-              controller: _amountController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: AppStrings.receivedAmount,
-                prefixText: '৳ ',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+
+            // Received Amount Field (only relevant for delivery/partial/price change)
+            if (widget.status == DeliveryStatus.delivered ||
+                widget.status == DeliveryStatus.partialDelivery ||
+                widget.status == DeliveryStatus.priceChange) ...[
+              TextField(
+                controller: _amountController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: AppStrings.receivedAmount,
+                  prefixText: '৳ ',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 32),
+              const SizedBox(height: 32),
+            ],
 
             // OTP Inputs
             OtpInput(
@@ -231,35 +299,58 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                     )
                   : TextButton(
                       onPressed: _resendCode,
-                      child: const Text(AppStrings.resendCode, style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                      child: const Text(AppStrings.resendCode,
+                          style: TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.bold)),
                     ),
             ),
             const SizedBox(height: 32),
 
-            // Verify Button & QC Button
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _verifyOtp,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(color: AppColors.white, strokeWidth: 2),
-                          )
-                        : const Text('Verify'),
-                  ),
+            // Action Buttons
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 52),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isLoading ? null : _submitQc,
-                    child: const Text('Submit to QC'),
-                  ),
-                ),
-              ],
+                onPressed: _isLoading ? null : _verifyOtp,
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            color: AppColors.white, strokeWidth: 2),
+                      )
+                    : const Text('Verify & Confirm',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
             ),
+
+            // QC OTP button — only shown when explicitly navigated here for QC
+            if (widget.needsQcButton) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                    side: const BorderSide(color: Colors.blue),
+                    minimumSize: const Size(0, 52),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _isLoading ? null : _submitQcOtp,
+                  child: const Text('Submit as QC OTP',
+                      style: TextStyle(fontSize: 16)),
+                ),
+              ),
+            ],
           ],
         ),
       ),

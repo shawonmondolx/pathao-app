@@ -23,7 +23,7 @@
         </intent>
     </queries>
     <application
-        android:label="pathao_agent"
+        android:label="Pathao NEW"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"

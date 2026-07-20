@@ -46,7 +46,7 @@ class StatusBadge extends StatelessWidget {
       case 'ON HOLD':
       case 'ONHOLD':
       case 'PICKUP_ON_HOLD':
-        bgColor = AppColors.orangeLight.withOpacity(0.2);
+        bgColor = AppColors.orangeLight.withValues(alpha: 0.2);
         textColor = AppColors.orangeDarker;
         break;
       case 'RETURNED':
@@ -56,7 +56,7 @@ class StatusBadge extends StatelessWidget {
         textColor = AppColors.redDarker;
         break;
       case 'PARTIAL DELIVERY':
-        bgColor = AppColors.violet.withOpacity(0.2);
+        bgColor = AppColors.violet.withValues(alpha: 0.2);
         textColor = AppColors.violet;
         break;
       default:

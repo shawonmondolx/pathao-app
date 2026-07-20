@@ -120,19 +120,8 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
         timeLimit: const Duration(seconds: 10),
       );
     } catch (_) {
-      // ✅ Fallback to mock coordinates for Emulator testing if GPS hangs
-      return Position(
-        latitude: 23.8103,
-        longitude: 90.4125,
-        timestamp: DateTime.now(),
-        accuracy: 100,
-        altitude: 0,
-        altitudeAccuracy: 100,
-        heading: 0,
-        headingAccuracy: 100,
-        speed: 0,
-        speedAccuracy: 100,
-      );
+      state = state.copyWith(errorMessage: 'Failed to fetch exact location.');
+      return null;
     }
   }
 

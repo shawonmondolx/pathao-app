@@ -77,16 +77,21 @@ final GoRouter appRouter = GoRouter(
       builder: (context, state) {
         final id = state.pathParameters['id']!;
         final extras = state.extra as Map<String, dynamic>?;
-        final recipientPhone = extras?['phone'] ?? '';
-        final runOrderId = extras?['runOrderId'] ?? 0;
-        final collectedAmount = extras?['collectedAmount'] ?? 0.0;
-        final status = extras?['status'] ?? 2;
+        // Bug fix: detail screen passes 'recipientPhone', not 'phone'
+        final recipientPhone = extras?['recipientPhone'] as String? ?? extras?['phone'] as String? ?? '';
+        final runOrderId = (extras?['runOrderId'] as int?) ?? 0;
+        final collectedAmount = (extras?['collectedAmount'] as double?) ?? 0.0;
+        final status = (extras?['status'] as int?) ?? 2;
+        final needsQcButton = (extras?['needsQcButton'] as bool?) ?? false;
+        final otpTarget = (extras?['otpTarget'] as String?) ?? 'merchant';
         return OtpScreen(
           consignmentId: id,
           runOrderId: runOrderId,
           recipientPhone: recipientPhone,
           collectedAmount: collectedAmount,
           status: status,
+          needsQcButton: needsQcButton,
+          otpTarget: otpTarget,
         );
       },
     ),

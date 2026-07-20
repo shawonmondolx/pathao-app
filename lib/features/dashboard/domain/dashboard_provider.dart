@@ -19,6 +19,8 @@ class DashboardStats {
   final bool hasDelivery;
   final bool hasPickup;
 
+  int get calculatedCompleted => delivered + priceChange + returned + partialDelivery + onHold + drto + exchange;
+
   DashboardStats({
     required this.cashCollected,
     required this.cashCollectableTotal,

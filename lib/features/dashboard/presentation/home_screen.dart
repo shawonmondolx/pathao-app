@@ -360,7 +360,7 @@ class _DashboardTab extends ConsumerWidget {
                     children: [
                       _buildGridCardWithDetails(
                         'DELIVERY TARGET',
-                        '${stats.deliveryCompleted} / ${stats.deliveryTotal}',
+                        '${stats.calculatedCompleted} / ${stats.deliveryTotal}',
                         context,
                         onTap: () => onNavigate(null), // clears filter
                       ),

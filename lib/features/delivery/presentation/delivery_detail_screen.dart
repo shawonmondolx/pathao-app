@@ -381,10 +381,34 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
     _onScanSuccess(item.id);
   }
 
-  // After unlock: one-tap deliver (no OTP, no dialog — same as real app)
+  // After unlock: one-tap deliver.
+  //
+  // Rule A (v2.md): collectable > 0  → one-click, NO OTP, NO dialog.
+  // Rule B (v2.md): collectable <= 0 → intercept LOCALLY, navigate directly to
+  //                  customer OTP screen (otp_type="customer"). Skip amount dialog
+  //                  (nothing to collect) and skip the API call entirely.
   Future<void> _doDeliver(Consignment item) async {
     final screenCtx = context;
 
+    // ── Rule B: Paid / Pre-paid Delivery (collectable <= 0) ──────────────────
+    // Per v2.md: "The app intercepts the one-click process and prompts for the
+    // Customer's OTP." This must be decided LOCALLY — do NOT call the API first.
+    if (item.amount <= 0) {
+      screenCtx.push(
+        '/delivery/${item.id}/otp',
+        extra: {
+          'runOrderId': item.runOrderId,
+          'recipientPhone': item.recipientPhone,
+          'collectedAmount': 0.0,
+          'status': DeliveryStatus.delivered,
+          'otpTarget': 'customer', // ← sends otp_type="customer" to the API
+        },
+      );
+      return;
+    }
+
+    // ── Rule A: Normal COD Delivery (collectable > 0) ─────────────────────────
+    // Show amount confirmation dialog, then fire the API — no OTP needed.
     final amountController = TextEditingController(text: item.amount.toStringAsFixed(0));
     final confirmed = await showDialog<double>(
       context: screenCtx,
@@ -443,13 +467,16 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           if (screenCtx.mounted) screenCtx.pop();
         }
       } else if (error == 'REQUIRE_OTP') {
+        // Server unexpectedly required OTP for a non-zero amount parcel.
+        // Always treat as customer OTP (consistent with delivery otp_type rules).
         screenCtx.push(
           '/delivery/${item.id}/otp',
           extra: {
             'runOrderId': item.runOrderId,
             'recipientPhone': item.recipientPhone,
             'collectedAmount': confirmed,
-            'status': 1, // Delivery status
+            'status': DeliveryStatus.delivered,
+            'otpTarget': 'customer', // ← always customer for delivery OTP fallback
           },
         );
       } else {

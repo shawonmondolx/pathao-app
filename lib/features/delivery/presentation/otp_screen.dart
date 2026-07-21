@@ -79,11 +79,24 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     }
   }
 
-  // Calls the right resend endpoint based on otpTarget.
-  // Returns (merchant/delivery) → /sms-resend
-  // Returns (customer/return)   → /return-sms-resend
+  // Calls the right resend endpoint based on otpTarget AND status.
+  //
+  // Delivery customer OTP (paid parcel, status=delivered):
+  //   → POST /delivery/sms-resend with otp_type="customer"
+  // Return customer OTP (status=returned):
+  //   → POST /return-sms-resend with otp_type="customer"
+  // Merchant OTP (any status):
+  //   → POST /delivery/sms-resend with otp_type="store_otp_number"
   Future<bool> _resendViaCorrectEndpoint() {
     if (widget.otpTarget == 'customer') {
+      if (widget.status == DeliveryStatus.delivered) {
+        // Paid delivery: customer OTP → use delivery resend endpoint
+        return ref.read(deliveryProvider.notifier).resendOtpSms(
+              runOrderId: widget.runOrderId,
+              otpType: 'customer',
+            );
+      }
+      // Return flow: customer OTP → use return resend endpoint
       return ref.read(deliveryProvider.notifier).returnSmsResend(
             runOrderId: widget.runOrderId,
             otpType: 'customer',

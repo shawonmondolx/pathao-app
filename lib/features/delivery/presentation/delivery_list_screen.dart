@@ -323,7 +323,7 @@ class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    StatusBadge(status: item.status),
+                                    StatusBadge(status: item.effectiveStatus),
                                     const SizedBox(width: 8),
                                     Text(
                                       '৳ ${item.amount.toStringAsFixed(0)}',

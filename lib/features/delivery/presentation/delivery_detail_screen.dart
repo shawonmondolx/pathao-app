@@ -145,38 +145,46 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
   Future<void> _showReturnDialog(Consignment item) async {
     final screenCtx = context;
     final reasonsAsync = ref.read(returnReasonsProvider);
-    final reasons = reasonsAsync.value ?? [
-      'Merchant requested return',
-      'Customer rejected packaging',
-      'Item damaged in transit',
-      'Wrong item delivered',
-      'Customer address not found',
+    // reasons are encoded as 'en||bn' — fallback if not yet loaded
+    final rawReasons = reasonsAsync.value ?? [
+      'Merchant requested return||মার্চেন্ট রিটার্নের অনুরোধ করেছেন',
+      'Customer rejected packaging||কাস্টমার প্যাকেজিং প্রত্যাখ্যান করেছেন',
+      'Item damaged in transit||ট্রানজিটে পণ্য নষ্ট হয়েছে',
+      'Wrong item delivered||ভুল পণ্য ডেলিভারি হয়েছে',
+      'Customer address not found||কাস্টমারের ঠিকানা পাওয়া যায়নি',
     ];
 
-    String? selectedReason;
+    // Parse into display (bn) and API (en) parts
+    final reasons = rawReasons.map((r) {
+      final parts = r.split('||');
+      return (en: parts[0].trim(), bn: parts.length > 1 ? parts[1].trim() : parts[0].trim());
+    }).toList();
+
+    // selectedReason holds the English key to send to API
+    String? selectedReasonEn;
 
     await showDialog(
       context: screenCtx,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (_, setDialogState) => AlertDialog(
-          title: const Text('Initiate Return'),
+          title: const Text('রিটার্ন শুরু করুন'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Select return reason:',
+                const Text('রিটার্নের কারণ নির্বাচন করুন:',
                     style: TextStyle(fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
                 ...reasons.map((reason) {
                   return RadioListTile<String>(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    title: Text(reason, style: const TextStyle(fontSize: 14)),
-                    value: reason,
-                    groupValue: selectedReason,
+                    title: Text(reason.bn, style: const TextStyle(fontSize: 14)),
+                    value: reason.en,
+                    groupValue: selectedReasonEn,
                     onChanged: (val) =>
-                        setDialogState(() => selectedReason = val),
+                        setDialogState(() => selectedReasonEn = val),
                   );
                 }),
               ],
@@ -185,74 +193,49 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(dialogCtx),
-                child: const Text('Cancel')),
+                child: const Text('বাতিল')),
             ElevatedButton(
-              onPressed: selectedReason == null
+              onPressed: selectedReasonEn == null
                   ? null
                   : () async {
                       Navigator.pop(dialogCtx);
-                      // ── Step 1: fire the return API immediately (one-click for most parcels) ──
                       showDialog(
                         context: screenCtx,
                         barrierDismissible: false,
                         builder: (_) =>
                             const Center(child: CircularProgressIndicator()),
                       );
-                      final errorMsg = await ref
-                          .read(deliveryProvider.notifier)
-                          .initiateReturn(
-                            consignmentId: item.id,
-                            runOrderId: item.runOrderId,
-                            reason: selectedReason!,
-                            proceedMethod: _proceedMethod,
-                          );
+                      String? errorMsg;
+                      if (item.isOtplessReturnAvailable) {
+                        errorMsg = await ref
+                            .read(deliveryProvider.notifier)
+                            .completeReturnOtpless(
+                              consignmentId: item.id,
+                              runOrderId: item.runOrderId,
+                              reason: selectedReasonEn!,
+                            );
+                      } else {
+                        errorMsg = await ref
+                            .read(deliveryProvider.notifier)
+                            .initiateReturn(
+                              consignmentId: item.id,
+                              runOrderId: item.runOrderId,
+                              reason: selectedReasonEn!, // send English to API
+                              proceedMethod: _proceedMethod,
+                            );
+                      }
                       if (!screenCtx.mounted) return;
                       Navigator.pop(screenCtx); // dismiss loading
 
                       if (errorMsg == null) {
-                        // ✅ One-click return — no OTP needed
+                        // Success — either queued (return request) or fully returned
                         _showResultSnackbar(null,
-                            successMsg: 'Return initiated successfully!');
-                      } else if (errorMsg == 'REQUIRE_OTP') {
-                        // ── Step 2 (only if server demands OTP): ask merchant or customer ──
-                        final otpTarget = await showDialog<String>(
-                          context: screenCtx,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('OTP Confirmation Required'),
-                            content: const Text(
-                                'This parcel requires OTP confirmation.\nWho should receive the OTP?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.pop(ctx, 'merchant'),
-                                child: const Text('Merchant'),
-                              ),
-                              ElevatedButton(
-                                onPressed: () =>
-                                    Navigator.pop(ctx, 'customer'),
-                                child: const Text('Customer'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (otpTarget != null && screenCtx.mounted) {
-                          screenCtx.push(
-                            '/delivery/${item.id}/otp',
-                            extra: {
-                              'runOrderId': item.runOrderId,
-                              'recipientPhone': item.recipientPhone,
-                              'collectedAmount': 0.0,
-                              'status': DeliveryStatus.returned,
-                              'otpTarget': otpTarget,
-                            },
-                          );
-                        }
+                            successMsg: 'রিটার্ন রিকোয়েস্ট সফলভাবে দেওয়া হয়েছে!');
                       } else {
-                        // Other API error
                         _showResultSnackbar(errorMsg);
                       }
                     },
-              child: const Text('Confirm'),
+              child: const Text('নিশ্চিত করুন'),
             ),
           ],
         ),
@@ -384,26 +367,57 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
   // After unlock: one-tap deliver.
   //
   // Rule A (v2.md): collectable > 0  → one-click, NO OTP, NO dialog.
-  // Rule B (v2.md): collectable <= 0 → intercept LOCALLY, navigate directly to
-  //                  customer OTP screen (otp_type="customer"). Skip amount dialog
-  //                  (nothing to collect) and skip the API call entirely.
+  // Rule B (v2.md): collectable <= 0 → call API first (this triggers the OTP SMS),
+  //                  then navigate to customer OTP screen (otp_type="customer").
+  //                  Skip the amount dialog (nothing to collect).
   Future<void> _doDeliver(Consignment item) async {
     final screenCtx = context;
 
     // ── Rule B: Paid / Pre-paid Delivery (collectable <= 0) ──────────────────
-    // Per v2.md: "The app intercepts the one-click process and prompts for the
-    // Customer's OTP." This must be decided LOCALLY — do NOT call the API first.
+    // We must still call the API first — the server's REQUIRE_OTP response is
+    // what triggers the OTP SMS to be sent to the customer. Skipping the API
+    // means no OTP is ever sent, causing "Failed to send OTP" on the resend call.
     if (item.amount <= 0) {
-      screenCtx.push(
-        '/delivery/${item.id}/otp',
-        extra: {
-          'runOrderId': item.runOrderId,
-          'recipientPhone': item.recipientPhone,
-          'collectedAmount': 0.0,
-          'status': DeliveryStatus.delivered,
-          'otpTarget': 'customer', // ← sends otp_type="customer" to the API
-        },
+      showDialog(
+        context: screenCtx,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
       );
+
+      final error = await ref.read(deliveryProvider.notifier).completeDeliveryWithScan(
+        consignmentId: item.id,
+        runOrderId: item.runOrderId,
+        collectedAmount: 0,
+        proceedMethod: _proceedMethod,
+      );
+
+      if (!screenCtx.mounted) return;
+      Navigator.pop(screenCtx); // dismiss loading
+
+      if (error == 'REQUIRE_OTP') {
+        // Expected path: server sent OTP SMS to customer → go to OTP screen
+        screenCtx.push(
+          '/delivery/${item.id}/otp',
+          extra: {
+            'runOrderId': item.runOrderId,
+            'recipientPhone': item.recipientPhone,
+            'collectedAmount': 0.0,
+            'status': DeliveryStatus.delivered,
+            'otpTarget': 'customer', // otp_type="customer"
+            'proceedMethod': _proceedMethod, // match the scan method used above
+          },
+        );
+      } else if (error == null) {
+        // Rare: server accepted without OTP
+        _showResultSnackbar(null, successMsg: '✅ Delivered successfully!');
+        if (item.isDocument || item.isPhotoProofNeeded) {
+          screenCtx.push('/delivery/${item.id}/proof');
+        } else {
+          if (screenCtx.mounted) screenCtx.pop();
+        }
+      } else {
+        _showResultSnackbar(error);
+      }
       return;
     }
 
@@ -477,6 +491,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
             'collectedAmount': confirmed,
             'status': DeliveryStatus.delivered,
             'otpTarget': 'customer', // ← always customer for delivery OTP fallback
+            'proceedMethod': _proceedMethod, // match the scan method
           },
         );
       } else {
@@ -1052,7 +1067,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
                         Text(order.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                       ],
                     ),
-                    StatusBadge(status: order.status),
+                    StatusBadge(status: order.effectiveStatus),
                   ],
                 ),
               ),

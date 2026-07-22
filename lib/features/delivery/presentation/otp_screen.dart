@@ -22,6 +22,10 @@ class OtpScreen extends ConsumerStatefulWidget {
   /// 'customer' → uses 'customer' otp_type + return sms-resend endpoint
   final String otpTarget;
 
+  /// Must match the proceed_method used in the initial delivery API call.
+  /// 2=QR_SCAN (default, after scanning), 1=GENERAL (no-scan hubs).
+  final int proceedMethod;
+
   const OtpScreen({
     super.key,
     required this.consignmentId,
@@ -31,6 +35,7 @@ class OtpScreen extends ConsumerStatefulWidget {
     required this.status,
     this.needsQcButton = false,
     this.otpTarget = 'merchant',
+    this.proceedMethod = ProceedMethod.qrScan,
   });
 
   @override
@@ -54,8 +59,19 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   void initState() {
     super.initState();
     _amountController.text = widget.collectedAmount.toStringAsFixed(0);
-    // Trigger the OTP SMS immediately when screen opens
-    WidgetsBinding.instance.addPostFrameCallback((_) => _sendInitialOtp());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // For customer delivery OTP (paid parcel), the API call that returned
+      // REQUIRE_OTP already sent the SMS. Skip auto-resend to avoid hitting
+      // the 60-second cooldown immediately. Just start the resend timer.
+      if (widget.otpTarget == 'customer' && widget.status == DeliveryStatus.delivered) {
+        _startTimer();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('OTP sent to ${widget.recipientPhone}')),
+        );
+      } else {
+        _sendInitialOtp();
+      }
+    });
   }
 
   Future<void> _sendInitialOtp() async {
@@ -164,6 +180,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
           otp: _otpCode,
           status: widget.status,
           otpType: _otpType,
+          proceedMethod: widget.proceedMethod,
         );
 
     setState(() => _isLoading = false);
@@ -172,7 +189,9 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
       if (errorMsg == null) {
         // Only push to proof screen for actual delivery (status=1).
         // For return/exchange/partial/hold OTP, just pop back.
-        if (widget.status == DeliveryStatus.delivered) {
+        // Skip proof for pre-paid / free parcels (amount < 1 taka) — OTP alone is enough.
+        if (widget.status == DeliveryStatus.delivered &&
+            widget.collectedAmount >= 1) {
           context.pushReplacement('/delivery/${widget.consignmentId}/proof');
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -184,9 +203,14 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
           context.pop();
         }
       } else {
+        // 'REQUIRE_OTP' means the server still needs OTP (should not happen here
+        // since user just submitted one) — show a clear invalid-OTP message.
+        final displayMsg = errorMsg == 'REQUIRE_OTP'
+            ? 'Invalid OTP. Please check and try again.'
+            : errorMsg;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMsg),
+            content: Text(displayMsg),
             backgroundColor: AppColors.statusBad,
           ),
         );
@@ -277,10 +301,12 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Received Amount Field (only relevant for delivery/partial/price change)
-            if (widget.status == DeliveryStatus.delivered ||
-                widget.status == DeliveryStatus.partialDelivery ||
-                widget.status == DeliveryStatus.priceChange) ...[
+            // Received Amount Field — only show for COD deliveries with a
+            // non-zero amount. Hide for paid/pre-paid (collectedAmount == 0).
+            if ((widget.status == DeliveryStatus.delivered ||
+                    widget.status == DeliveryStatus.partialDelivery ||
+                    widget.status == DeliveryStatus.priceChange) &&
+                widget.collectedAmount > 0) ...[
               TextField(
                 controller: _amountController,
                 keyboardType: TextInputType.number,

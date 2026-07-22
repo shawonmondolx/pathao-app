@@ -27,6 +27,7 @@ class DeliveryStatus {
   static const int priceChange = 8;
   static const int drto = 9;
   static const int exchange = 10;
+  static const int returnRequest = 99;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,6 +66,8 @@ class Consignment {
   final bool isChatEnabled;
   final int unseenMessageCount;
   final String? paymentLink;
+  final String? requestedQcOrderStatus;
+  final bool? isQcOrderRequestRejected;
   /// True if this parcel is a document — requires a delivery_slip photo proof.
   final bool isDocument;
   /// True if QR scanning is required for this run before taking action.
@@ -72,6 +75,7 @@ class Consignment {
   final bool isScanRequired;
   /// Total parcel count in this order (used for partial delivery count hint).
   final int? totalItems;
+  final bool isOtplessReturnAvailable;
 
   Consignment({
     required this.id,
@@ -96,14 +100,28 @@ class Consignment {
     this.isChatEnabled = true,
     this.unseenMessageCount = 0,
     this.paymentLink,
+    this.requestedQcOrderStatus,
+    this.isQcOrderRequestRejected,
     this.isDocument = false,
     this.isScanRequired = true,
     this.totalItems,
+    this.isOtplessReturnAvailable = false,
   });
+
+  dynamic get effectiveStatus {
+    if (status == 1 || status == 'PENDING') {
+      if (isQcOrderRequestRejected == true) return 'QC REJECTED / PENDING';
+      if (requestedQcOrderStatus != null) return 'QC REQUESTED';
+    }
+    return status;
+  }
 
   Consignment copyWith({
     dynamic status,
     String? holdReason,
+    String? requestedQcOrderStatus,
+    bool? isQcOrderRequestRejected,
+    bool? isOtplessReturnAvailable,
   }) {
     return Consignment(
       id: id,
@@ -128,9 +146,12 @@ class Consignment {
       isChatEnabled: isChatEnabled,
       unseenMessageCount: unseenMessageCount,
       paymentLink: paymentLink,
+      requestedQcOrderStatus: requestedQcOrderStatus ?? this.requestedQcOrderStatus,
+      isQcOrderRequestRejected: isQcOrderRequestRejected ?? this.isQcOrderRequestRejected,
       isDocument: isDocument,
       isScanRequired: isScanRequired,
       totalItems: totalItems,
+      isOtplessReturnAvailable: isOtplessReturnAvailable ?? this.isOtplessReturnAvailable,
     );
   }
 
@@ -161,6 +182,8 @@ class Consignment {
       isChatEnabled: json['is_chat_enabled'] ?? true,
       unseenMessageCount: json['unseen_message_count'] ?? 0,
       paymentLink: json['payment_link'],
+      requestedQcOrderStatus: json['requested_qc_order_status']?.toString(),
+      isQcOrderRequestRejected: json['is_qc_order_request_rejected'] == true || json['is_qc_order_request_rejected'] == 'true' || json['is_qc_order_request_rejected'] == 1,
       // is_document: parcel requires photo delivery proof
       isDocument: json['is_document'] == true || json['isDocument'] == true,
       // is_scan_required: hub/run requires QR scan before action.
@@ -169,6 +192,7 @@ class Consignment {
           json['isScanRequired'] != false &&
           json['da_scan_required'] != false,
       totalItems: json['total_items'] ?? json['item_count'] ?? json['quantity'],
+      isOtplessReturnAvailable: json['is_otpless_return_available'] ?? false,
     );
   }
 }
@@ -461,6 +485,7 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
     int status = DeliveryStatus.delivered,
     String otpType = OtpType.storeOtpNumber,
     String? reason,
+    int proceedMethod = ProceedMethod.general,
   }) async {
     try {
       final dioClient = DioClient();
@@ -471,7 +496,7 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
         'otp_type': otpType,
         if (collectedAmount != 0) 'collected_amount': collectedAmount.toInt(),
         if (otp.isNotEmpty) 'otp': otp,
-        'proceed_method': ProceedMethod.general,
+        'proceed_method': proceedMethod,
         if (reason != null && reason.isNotEmpty) 'reason': reason,
       });
 
@@ -561,7 +586,6 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
   // INITIATE RETURN — POST /api/v1/user/delivery (NOT PUT)
   // otpType: 'store_otp_number' (merchant) or 'customer' depending on who
   // the original app's "Universal OTP Target Selection" sends to.
-  // otp: optional — only provided when the user has already entered an OTP.
   // ───────────────────────────────────────────────────────────────────────────
   Future<String?> initiateReturn({
     required String consignmentId,
@@ -601,17 +625,66 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
       print('DATA: ${response.data}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        updateStatus(consignmentId, DeliveryStatus.returned, reason: reason);
-        return null;
+        final msg = response.data['message']?.toString()?.toLowerCase() ?? '';
+
+        if (msg == 'store') {
+          // Attempts 1-3: server queued the return request.
+          updateStatus(consignmentId, DeliveryStatus.returnRequest, reason: reason);
+        } else {
+          // Attempt 4+: server finalized the return. Parcel is fully returned.
+          updateStatus(consignmentId, DeliveryStatus.returned, reason: reason);
+        }
+        return null; // Always success — no OTP needed for returns
       }
       return 'Server error: Status ${response.statusCode}';
     } catch (e) {
-      print('=== RETURN FormData failed ===');
+      print('=== INITIATE RETURN failed ===');
       if (e is DioException) {
         print('STATUS: ${e.response?.statusCode}');
         print('DATA: ${e.response?.data}');
       }
       return _extractError(e, 'Failed to initiate return');
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // COMPLETE OTPLESS RETURN
+  // ───────────────────────────────────────────────────────────────────────────
+  Future<String?> completeReturnOtpless({
+    required String consignmentId,
+    required int runOrderId,
+    required String reason,
+  }) async {
+    try {
+      final dioClient = DioClient();
+      final payload = <String, dynamic>{
+        'run_order_id': runOrderId,
+        'status': DeliveryStatus.returned,
+        'reason': reason,
+        'otp_type': OtpType.storeOtpNumber,
+        'proceed_method': 3,
+      };
+
+      print('=== COMPLETE OTPLESS RETURN REQUEST ===');
+      print('URL: ${ApiEndpoints.deliveryComplete}');
+      print('PAYLOAD: $payload');
+
+      final response = await dioClient.dio.post(
+        ApiEndpoints.deliveryComplete,
+        data: payload,
+        options: Options(headers: {'Content-Type': 'application/json'}),
+      );
+
+      print('STATUS: ${response.statusCode}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        updateStatus(consignmentId, DeliveryStatus.returned, reason: reason);
+        return null; // Success!
+      }
+      return 'Server error: Status ${response.statusCode}';
+    } catch (e) {
+      print('=== COMPLETE OTPLESS RETURN failed ===');
+      return _extractError(e, 'Failed to complete otpless return');
     }
   }
 
@@ -850,7 +923,19 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
     }
   }
 
-
+  void updateQcStatus(String consignmentId) {
+    if (state.hasValue) {
+      final currentState = state.value!;
+      final updatedOrders = [
+        for (final item in currentState.orders)
+          if (item.id == consignmentId)
+            item.copyWith(requestedQcOrderStatus: 'REQUESTED')
+          else
+            item
+      ];
+      state = AsyncValue.data(currentState.copyWith(orders: updatedOrders));
+    }
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // PRICE CHANGE — POST /api/v1/user/delivery/check, status=8
@@ -1004,6 +1089,7 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<DeliveryState>> {
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        updateQcStatus(consignmentId);
         return null;
       }
       return 'Server error: Status ${response.statusCode}';

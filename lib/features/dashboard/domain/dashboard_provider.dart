@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/constants/api_endpoints.dart';
 
@@ -56,12 +57,13 @@ class DashboardStats {
     );
   }
 
-  factory DashboardStats.fromJson(Map<String, dynamic> json) {
+  factory DashboardStats.fromJson(Map<String, dynamic> json, {int localReturnCount = 0}) {
     int delivered = json['delivery_completed'] ?? json['delivered'] ?? 0;
     int priceChange = json['price_change'] ?? 0;
-    int returned = json['returned'] ?? json['return'] ?? 0;
+    int returned = (json['returned'] ?? json['return'] ?? 0) + localReturnCount;
     int partialDelivery = json['partial_delivery'] ?? 0;
-    int onHold = json['on_hold'] ?? 0;
+    int onHoldRaw = json['on_hold'] ?? 0;
+    int onHold = (onHoldRaw - localReturnCount < 0) ? 0 : (onHoldRaw - localReturnCount);
     int drto = json['drto'] ?? 0;
     int exchange = json['exchange'] ?? 0;
     int totalCompleted = delivered + priceChange + returned + partialDelivery + onHold + drto + exchange;
@@ -98,7 +100,12 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardStats>> {
       final response = await dioClient.dio.get(ApiEndpoints.dashboard);
       if (response.statusCode == 200) {
         final data = response.data['data'] ?? response.data;
-        state = AsyncValue.data(DashboardStats.fromJson(Map<String, dynamic>.from(data)));
+        
+        final prefs = await SharedPreferences.getInstance();
+        final localReturnRequests = prefs.getStringList('local_return_requests') ?? [];
+        int localCount = localReturnRequests.length;
+        
+        state = AsyncValue.data(DashboardStats.fromJson(Map<String, dynamic>.from(data), localReturnCount: localCount));
       } else {
         throw Exception('Server returned status ${response.statusCode}');
       }

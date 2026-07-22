@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/storage/secure_storage.dart';
+import '../../features/delivery/domain/delivery_provider.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/permissions_screen.dart';
 import '../../features/dashboard/presentation/home_screen.dart';
@@ -84,6 +85,7 @@ final GoRouter appRouter = GoRouter(
         final status = (extras?['status'] as int?) ?? 2;
         final needsQcButton = (extras?['needsQcButton'] as bool?) ?? false;
         final otpTarget = (extras?['otpTarget'] as String?) ?? 'merchant';
+        final proceedMethod = (extras?['proceedMethod'] as int?) ?? ProceedMethod.qrScan;
         return OtpScreen(
           consignmentId: id,
           runOrderId: runOrderId,
@@ -92,6 +94,7 @@ final GoRouter appRouter = GoRouter(
           status: status,
           needsQcButton: needsQcButton,
           otpTarget: otpTarget,
+          proceedMethod: proceedMethod,
         );
       },
     ),

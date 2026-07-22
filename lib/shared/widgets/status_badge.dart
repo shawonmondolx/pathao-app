@@ -17,6 +17,8 @@ class StatusBadge extends StatelessWidget {
           return 'ON HOLD';
         case 4:
           return 'RETURNED';
+        case 99:
+          return 'RETURN REQUEST';
         default:
           return 'UNKNOWN';
       }
@@ -55,9 +57,21 @@ class StatusBadge extends StatelessWidget {
         bgColor = AppColors.redLighter;
         textColor = AppColors.redDarker;
         break;
+      case 'RETURN REQUEST':
+        bgColor = const Color(0xFFFFEDCC);
+        textColor = const Color(0xFFB85C00);
+        break;
       case 'PARTIAL DELIVERY':
         bgColor = AppColors.violet.withValues(alpha: 0.2);
         textColor = AppColors.violet;
+        break;
+      case 'QC REQUESTED':
+        bgColor = AppColors.infoBlue.withValues(alpha: 0.2);
+        textColor = AppColors.infoBlue;
+        break;
+      case 'QC REJECTED / PENDING':
+        bgColor = AppColors.redLighter;
+        textColor = AppColors.redDarker;
         break;
       default:
         bgColor = AppColors.greyLight;
